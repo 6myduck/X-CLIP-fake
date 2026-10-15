@@ -57,23 +57,37 @@ class XCLIP(CLIP4ClipPreTrainedModel):
             assert output_width ** 2 + 1 == clip_state_dict["visual.attnpool.positional_embedding"].shape[0]
             image_resolution = output_width * 32
 
+        pretrained_vision_layers = vision_layers
+
         embed_dim = clip_state_dict["text_projection"].shape[1]
         context_length = clip_state_dict["positional_embedding"].shape[0]
         vocab_size = clip_state_dict["token_embedding.weight"].shape[0]
         transformer_width = clip_state_dict["ln_final.weight"].shape[0]
         transformer_heads = transformer_width // 64
         transformer_layers = len(set(k.split(".")[2] for k in clip_state_dict if k.startswith(f"transformer.resblocks")))
+        pretrained_transformer_layers = transformer_layers
+
+        vision_layers = getattr(task_config, "visual_num_hidden_layers", pretrained_vision_layers)
+        transformer_layers = getattr(task_config, "text_num_hidden_layers", pretrained_transformer_layers)
+        if not 1 <= vision_layers <= pretrained_vision_layers:
+            raise ValueError("visual_num_hidden_layers must be between 1 and {}, got {}"
+                             .format(pretrained_vision_layers, vision_layers))
+        if not 1 <= transformer_layers <= pretrained_transformer_layers:
+            raise ValueError("text_num_hidden_layers must be between 1 and {}, got {}"
+                             .format(pretrained_transformer_layers, transformer_layers))
 
         show_log(task_config, "\t embed_dim: {}".format(embed_dim))
         show_log(task_config, "\t image_resolution: {}".format(image_resolution))
-        show_log(task_config, "\t vision_layers: {}".format(vision_layers))
+        show_log(task_config, "\t vision_layers: {} (pretrained: {})".format(
+            vision_layers, pretrained_vision_layers))
         show_log(task_config, "\t vision_width: {}".format(vision_width))
         show_log(task_config, "\t vision_patch_size: {}".format(vision_patch_size))
         show_log(task_config, "\t context_length: {}".format(context_length))
         show_log(task_config, "\t vocab_size: {}".format(vocab_size))
         show_log(task_config, "\t transformer_width: {}".format(transformer_width))
         show_log(task_config, "\t transformer_heads: {}".format(transformer_heads))
-        show_log(task_config, "\t transformer_layers: {}".format(transformer_layers))
+        show_log(task_config, "\t transformer_layers: {} (pretrained: {})".format(
+            transformer_layers, pretrained_transformer_layers))
 
         self.linear_patch = '2d'
         if hasattr(task_config, "linear_patch"):
@@ -81,12 +95,10 @@ class XCLIP(CLIP4ClipPreTrainedModel):
             show_log(task_config, "\t\t linear_patch: {}".format(self.linear_patch))
 
         # use .float() to avoid overflow/underflow from fp16 weight. https://github.com/openai/CLIP/issues/40
-        cut_top_layer = 0
-        show_log(task_config, "\t cut_top_layer: {}".format(cut_top_layer))
         self.clip = CLIP(
             embed_dim,
-            image_resolution, vision_layers-cut_top_layer, vision_width, vision_patch_size,
-            context_length, vocab_size, transformer_width, transformer_heads, transformer_layers-cut_top_layer,
+            image_resolution, vision_layers, vision_width, vision_patch_size,
+            context_length, vocab_size, transformer_width, transformer_heads, transformer_layers,
             linear_patch=self.linear_patch
         ).float()
 

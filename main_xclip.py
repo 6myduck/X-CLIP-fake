@@ -81,8 +81,10 @@ def get_args(description='X-CLIP on Retrieval Task'):
     parser.add_argument('--use_mil', action='store_true', help="Whether use MIL as Miech et. al. (2020).")
     parser.add_argument('--sampled_use_mil', action='store_true', help="Whether MIL, has a high priority than use_mil.")
 
-    parser.add_argument('--text_num_hidden_layers', type=int, default=12, help="Layer NO. of text.")
-    parser.add_argument('--visual_num_hidden_layers', type=int, default=12, help="Layer NO. of visual.")
+    parser.add_argument('--text_num_hidden_layers', type=int, default=12,
+                        help="Number of pretrained CLIP text Transformer layers to keep.")
+    parser.add_argument('--visual_num_hidden_layers', type=int, default=12,
+                        help="Number of pretrained CLIP visual Transformer layers to keep.")
     parser.add_argument('--cross_num_hidden_layers', type=int, default=4, help="Layer NO. of cross.")
 
     parser.add_argument('--loose_type', action='store_true', help="Default using tight type for retrieval.")
@@ -440,7 +442,8 @@ def main():
     ## ####################################
     # freeze testing
     ## ####################################
-    assert args.freeze_layer_num <= 12 and args.freeze_layer_num >= -1
+    max_encoder_layers = max(args.text_num_hidden_layers, args.visual_num_hidden_layers)
+    assert -1 <= args.freeze_layer_num <= max_encoder_layers
     if hasattr(model, "clip") and args.freeze_layer_num > -1:
         for name, param in model.clip.named_parameters():
             # top layers always need to train
@@ -457,6 +460,12 @@ def main():
             else:
                 # paramenters which < freeze_layer_num will be freezed
                 param.requires_grad = False
+
+    if args.local_rank == 0:
+        total_params = sum(param.numel() for param in model.parameters())
+        trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+        logger.info("Model parameters: %.2fM total, %.2fM trainable",
+                    total_params / 1e6, trainable_params / 1e6)
 
     ## ####################################
     # dataloader loading
